@@ -5,6 +5,8 @@ import MLXNN
 import MLXRandom
 @testable import KuyuWorldModel
 
+@Suite(.serialized) struct SerializedWorldModelMLXTests {
+
 @Suite struct WorldModelConfigTests {
 
     @Test func configCreatesWithDefaults() {
@@ -264,4 +266,42 @@ import MLXRandom
         #expect(state.h.count == config.hiddenDimensions)
         #expect(state.z == nil)
     }
+}
+
+@Suite struct StateWorldModelTrainerTests {
+
+    @Test func trainerProducesFiniteLossForSmallResidualBatch() {
+        let config = WorldModelConfig(
+            physicsDimensions: 3,
+            sensorDimensions: 2,
+            actionDimensions: 1,
+            hiddenDimensions: 8,
+            stochasticCategories: 2,
+            stochasticClasses: 2,
+            residualDimensions: 3,
+            extensionDimensions: 2,
+            tokenizerLayers: 1,
+            physicsEmbedDimensions: 8
+        )
+        let model = StateWorldModel(config: config)
+        let batch = StateWorldModelTrainingBatch(
+            physicsStates: MLXArray.zeros([1, 2, config.physicsDimensions]),
+            sensorObservations: MLXArray.zeros([1, 2, config.sensorDimensions]),
+            actions: MLXArray.zeros([1, 2, config.actionDimensions]),
+            residualTargets: MLXArray.zeros([1, 2, config.residualDimensions])
+        )
+
+        let losses = StateWorldModelTrainer.train(
+            model: model,
+            batches: [batch],
+            learningRate: 0.001,
+            maxGradNorm: nil,
+            epochs: 1
+        )
+
+        #expect(losses.count == 1)
+        #expect(losses[0].isFinite)
+    }
+}
+
 }
