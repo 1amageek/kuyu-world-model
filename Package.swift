@@ -15,7 +15,7 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../kuyu-core"),
-        .package(url: "https://github.com/ml-explore/mlx-swift", from: "0.29.1"),
+        .package(url: "https://github.com/ml-explore/mlx-swift", from: "0.31.3"),
     ],
     targets: [
         .target(
