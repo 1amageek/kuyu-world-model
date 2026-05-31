@@ -409,8 +409,32 @@ import KuyuCore
 @Suite struct StateWorldModelTrainerTests {
 
     @Test func trainerConfigStoresKLWeight() {
-        let config = StateWorldModelTrainer.Config(klWeight: 0.25)
+        let config = StateWorldModelTrainer.Config(klWeight: 0.25, uncertaintyVarianceFloor: 1e-3)
         #expect(config.klWeight == 0.25)
+        #expect(config.uncertaintyVarianceFloor == 1e-3)
+    }
+
+    @Test func uncertaintyNLLRewardsHigherUncertaintyForLargeResidualError() {
+        let predictions = MLXArray([Float(0), 0]).reshaped([1, 1, 2])
+        let targets = MLXArray([Float(0), 1]).reshaped([1, 1, 2])
+        let lowUncertainty = MLXArray([Float(0.1), 0.1]).reshaped([1, 1, 2])
+        let calibratedUncertainty = MLXArray([Float(0.1), 0.9]).reshaped([1, 1, 2])
+
+        let lowLoss = StateWorldModelTrainer.residualUncertaintyNLL(
+            predictions: predictions,
+            targets: targets,
+            uncertainty: lowUncertainty,
+            varianceFloor: 1e-4
+        )
+        let calibratedLoss = StateWorldModelTrainer.residualUncertaintyNLL(
+            predictions: predictions,
+            targets: targets,
+            uncertainty: calibratedUncertainty,
+            varianceFloor: 1e-4
+        )
+        eval(lowLoss, calibratedLoss)
+
+        #expect(calibratedLoss.item(Float.self) < lowLoss.item(Float.self))
     }
 
     @Test func trainerProducesFiniteLossForSmallResidualBatch() {

@@ -218,7 +218,7 @@ public struct LearnedWorldModelEnvironmentAdapter<Model: WorldModelProtocol>: Wo
     }
 
     private func maxUncertainty(_ output: WorldModelOutput) -> Double {
-        output.uncertainty
+        output.uncertainty.prefix(RootBodyAnalyticalState.dimensionCount)
             .map(Double.init)
             .max() ?? 0.0
     }

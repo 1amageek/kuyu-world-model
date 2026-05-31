@@ -40,6 +40,23 @@ import KuyuCore
     #expect(validation.accepted)
 }
 
+@Test func learnedWorldModelEnvironmentAdapterUsesResidualUncertaintyOnly() throws {
+    let step = try makeEnvironmentStep()
+    let uncertainty = Array(repeating: Float(0.05), count: 13)
+        + Array(repeating: Float(1.0), count: 16)
+    let model = FixedWorldModel(
+        residual: residual(z: 0.25),
+        uncertainty: uncertainty
+    )
+    let adapter = try LearnedWorldModelEnvironmentAdapter(
+        model: model,
+        timeStep: 0.001
+    )
+
+    let prediction = try adapter.predict(reference: step)
+    #expect(abs(prediction.uncertainty - 0.05) < 1e-6)
+}
+
 @Test func learnedWorldModelEnvironmentAdapterRejectsResidualBeyondGate() throws {
     let step = try makeEnvironmentStep()
     let model = FixedWorldModel(

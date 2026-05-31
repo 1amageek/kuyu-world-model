@@ -14,15 +14,18 @@ public enum StateWorldModelTrainer {
         public let residualWeight: Float
         public let uncertaintyWeight: Float
         public let klWeight: Float
+        public let uncertaintyVarianceFloor: Float
 
         public init(
             residualWeight: Float = 1.0,
             uncertaintyWeight: Float = 0.001,
-            klWeight: Float = 0.001
+            klWeight: Float = 0.001,
+            uncertaintyVarianceFloor: Float = 1e-4
         ) {
             self.residualWeight = residualWeight
             self.uncertaintyWeight = uncertaintyWeight
             self.klWeight = klWeight
+            self.uncertaintyVarianceFloor = max(uncertaintyVarianceFloor, Float.leastNonzeroMagnitude)
         }
     }
 
@@ -52,14 +55,20 @@ public enum StateWorldModelTrainer {
                 targets: targets,
                 reduction: .mean
             )
-            let uncertaintyPenalty = output.uncertainty.mean()
+            let residualUncertainty = output.uncertainty[.ellipsis, 0..<model.config.residualDimensions]
+            let uncertaintyLoss = residualUncertaintyNLL(
+                predictions: output.residual,
+                targets: targets,
+                uncertainty: residualUncertainty,
+                varianceFloor: config.uncertaintyVarianceFloor
+            )
             let klLoss = categoricalKLLoss(
                 priorLogits: output.priorLogits,
                 posteriorLogits: output.posteriorLogits,
                 modelConfig: model.config
             )
             return config.residualWeight * residualLoss
-                + config.uncertaintyWeight * uncertaintyPenalty
+                + config.uncertaintyWeight * uncertaintyLoss
                 + config.klWeight * klLoss
         }
         var epochLosses: [Float] = []
@@ -101,6 +110,17 @@ public enum StateWorldModelTrainer {
             return shape.first ?? 1
         }
         return max(1, shape[0] * shape[1])
+    }
+
+    static func residualUncertaintyNLL(
+        predictions: MLXArray,
+        targets: MLXArray,
+        uncertainty: MLXArray,
+        varianceFloor: Float
+    ) -> MLXArray {
+        let variance = square(uncertainty) + max(varianceFloor, Float.leastNonzeroMagnitude)
+        let error = predictions - targets
+        return (0.5 * (square(error) / variance + log(variance))).mean()
     }
 
     private static func categoricalKLLoss(
