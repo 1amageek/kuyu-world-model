@@ -8,6 +8,7 @@ public struct LearnedWorldModelEnvironmentAdapter<Model: WorldModelProtocol>: Wo
     public enum AdapterError: Error, Equatable {
         case invalidTimeStep(Double)
         case residualDimensionMismatch(expected: Int, actual: Int)
+        case invalidCorrectedQuaternion
     }
 
     private final class Storage: Sendable {
@@ -153,6 +154,12 @@ public struct LearnedWorldModelEnvironmentAdapter<Model: WorldModelProtocol>: Wo
         residual: [Double]
     ) throws -> PlantStateSnapshot {
         let root = plantState.root
+        let orientation = try normalizedQuaternion(
+            w: root.orientation.w + residual[6],
+            x: root.orientation.x + residual[7],
+            y: root.orientation.y + residual[8],
+            z: root.orientation.z + residual[9]
+        )
         let correctedRoot = RigidBodySnapshot(
             id: root.id,
             position: Axis3(
@@ -165,12 +172,7 @@ public struct LearnedWorldModelEnvironmentAdapter<Model: WorldModelProtocol>: Wo
                 y: root.velocity.y + residual[4],
                 z: root.velocity.z + residual[5]
             ),
-            orientation: QuaternionSnapshot(
-                w: root.orientation.w + residual[6],
-                x: root.orientation.x + residual[7],
-                y: root.orientation.y + residual[8],
-                z: root.orientation.z + residual[9]
-            ),
+            orientation: orientation,
             angularVelocity: Axis3(
                 x: root.angularVelocity.x + residual[10],
                 y: root.angularVelocity.y + residual[11],
@@ -182,6 +184,15 @@ public struct LearnedWorldModelEnvironmentAdapter<Model: WorldModelProtocol>: Wo
             bodies: plantState.bodies,
             scalars: plantState.scalars
         )
+    }
+
+    private func normalizedQuaternion(w: Double, x: Double, y: Double, z: Double) throws -> QuaternionSnapshot {
+        let squaredNorm = w * w + x * x + y * y + z * z
+        guard squaredNorm.isFinite, squaredNorm > 0 else {
+            throw AdapterError.invalidCorrectedQuaternion
+        }
+        let norm = sqrt(squaredNorm)
+        return QuaternionSnapshot(w: w / norm, x: x / norm, y: y / norm, z: z / norm)
     }
 
     private func correctedSensorSamples(

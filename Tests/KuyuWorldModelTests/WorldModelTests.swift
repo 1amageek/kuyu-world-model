@@ -3,6 +3,7 @@ import Testing
 import MLX
 import MLXNN
 import MLXRandom
+import KuyuCore
 @testable import KuyuWorldModel
 
 @Suite(.serialized) struct SerializedWorldModelMLXTests {
@@ -237,6 +238,74 @@ import MLXRandom
     }
 }
 
+@Suite struct MLXWorldModelControllerTests {
+
+    @Test func inferRejectsInvalidTimeStep() throws {
+        let config = smallControllerConfig()
+        var controller = MLXWorldModelController(model: StateWorldModel(config: config), config: config)
+
+        #expect(throws: MLXWorldModelController.ControllerError.invalidTimeStep(0)) {
+            _ = try controller.infer(
+                physicsPrediction: FixedAnalyticalState(values: [0, 0, 0]),
+                sensorObservations: [],
+                action: try actuatorValues(count: 1),
+                dt: 0
+            )
+        }
+    }
+
+    @Test func inferRejectsNonFinitePhysicsState() throws {
+        let config = smallControllerConfig()
+        var controller = MLXWorldModelController(model: StateWorldModel(config: config), config: config)
+
+        #expect(throws: MLXWorldModelController.ControllerError.nonFinitePhysicsState(index: 1)) {
+            _ = try controller.infer(
+                physicsPrediction: FixedAnalyticalState(values: [0, .nan, 0]),
+                sensorObservations: [],
+                action: try actuatorValues(count: 1),
+                dt: 0.01
+            )
+        }
+    }
+
+    @Test func inferRejectsOutOfRangeSensorChannel() throws {
+        let config = smallControllerConfig()
+        var controller = MLXWorldModelController(model: StateWorldModel(config: config), config: config)
+        let samples = [
+            try ChannelSample(channelIndex: 2, value: 1.0, timestamp: 0.0),
+        ]
+
+        #expect(throws: MLXWorldModelController.ControllerError.sensorChannelOutOfRange(channelIndex: 2, limit: 2)) {
+            _ = try controller.infer(
+                physicsPrediction: FixedAnalyticalState(values: [0, 0, 0]),
+                sensorObservations: samples,
+                action: try actuatorValues(count: 1),
+                dt: 0.01
+            )
+        }
+    }
+
+    @Test func predictFutureRejectsPerStepActionDimensionMismatch() throws {
+        let config = smallControllerConfig()
+        var controller = MLXWorldModelController(model: StateWorldModel(config: config), config: config)
+
+        #expect(throws: MLXWorldModelController.ControllerError.actionCountMismatch(expected: 1, got: 2)) {
+            _ = try controller.predictFuture(
+                steps: 1,
+                actions: [try actuatorValues(count: 2)]
+            )
+        }
+    }
+
+    @Test func predictFutureAllowsZeroSteps() throws {
+        let config = smallControllerConfig()
+        var controller = MLXWorldModelController(model: StateWorldModel(config: config), config: config)
+
+        let outputs = try controller.predictFuture(steps: 0, actions: [])
+        #expect(outputs.isEmpty)
+    }
+}
+
 @Suite struct DomainAdapterTests {
 
     @Test func adapterPreservesShape() {
@@ -304,4 +373,46 @@ import MLXRandom
     }
 }
 
+}
+
+private func smallControllerConfig() -> WorldModelConfig {
+    WorldModelConfig(
+        physicsDimensions: 3,
+        sensorDimensions: 2,
+        actionDimensions: 1,
+        hiddenDimensions: 8,
+        stochasticCategories: 2,
+        stochasticClasses: 2,
+        residualDimensions: 3,
+        extensionDimensions: 2,
+        tokenizerLayers: 1,
+        physicsEmbedDimensions: 8
+    )
+}
+
+private func actuatorValues(count: Int) throws -> [ActuatorValue] {
+    try (0..<count).map { index in
+        try ActuatorValue(index: ActuatorIndex(UInt32(index)), value: 0)
+    }
+}
+
+private struct FixedAnalyticalState: AnalyticalState {
+    let values: [Float]
+
+    var dimensions: Int { values.count }
+
+    func toArray() -> [Float] {
+        values
+    }
+
+    func toPlantStateSnapshot() -> PlantStateSnapshot {
+        let root = RigidBodySnapshot(
+            id: "root",
+            position: Axis3(x: 0, y: 0, z: 0),
+            velocity: Axis3(x: 0, y: 0, z: 0),
+            orientation: QuaternionSnapshot(w: 1, x: 0, y: 0, z: 0),
+            angularVelocity: Axis3(x: 0, y: 0, z: 0)
+        )
+        return PlantStateSnapshot(root: root)
+    }
 }

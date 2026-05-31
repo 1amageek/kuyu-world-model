@@ -15,9 +15,13 @@ import KuyuCore
 public struct MLXWorldModelController: WorldModelProtocol {
 
     public enum ControllerError: Error, Equatable {
+        case invalidTimeStep(Double)
+        case invalidStepCount(Int)
         case dimensionMismatch(expected: Int, got: Int)
         case actionCountMismatch(expected: Int, got: Int)
         case stepCountMismatch(expected: Int, got: Int)
+        case sensorChannelOutOfRange(channelIndex: UInt32, limit: Int)
+        case nonFinitePhysicsState(index: Int)
     }
 
     /// Thread-safe storage for non-Sendable model and mutable state.
@@ -63,15 +67,20 @@ public struct MLXWorldModelController: WorldModelProtocol {
         action: [ActuatorValue],
         dt: TimeInterval
     ) throws -> WorldModelOutput {
+        guard dt.isFinite, dt > 0 else {
+            throw ControllerError.invalidTimeStep(dt)
+        }
+
         // Convert physics prediction to MLXArray [1, physicsDim]
         let physicsArray = physicsPrediction.toArray()
         guard physicsArray.count == config.physicsDimensions else {
             throw ControllerError.dimensionMismatch(expected: config.physicsDimensions, got: physicsArray.count)
         }
+        try validateFinitePhysicsArray(physicsArray)
         let physicsMLX = MLXArray(physicsArray).reshaped([1, config.physicsDimensions])
 
         // Convert sensor observations to MLXArray [1, sensorDim]
-        let sensorValues = sensorObservationsToArray(sensorObservations)
+        let sensorValues = try sensorObservationsToArray(sensorObservations)
         let sensorMLX = MLXArray(sensorValues).reshaped([1, config.sensorDimensions])
 
         // Convert actions to MLXArray [1, actionDim]
@@ -116,14 +125,23 @@ public struct MLXWorldModelController: WorldModelProtocol {
         steps: Int,
         actions: [[ActuatorValue]]
     ) throws -> [WorldModelOutput] {
+        guard steps >= 0 else {
+            throw ControllerError.invalidStepCount(steps)
+        }
         guard actions.count == steps else {
             throw ControllerError.stepCountMismatch(expected: steps, got: actions.count)
+        }
+        guard steps > 0 else {
+            return []
         }
 
         // Build actions tensor [1, steps, actionDim]
         var actionData: [Float] = []
         for stepActions in actions {
             let values = stepActions.map { Float($0.value) }
+            guard values.count == config.actionDimensions else {
+                throw ControllerError.actionCountMismatch(expected: config.actionDimensions, got: values.count)
+            }
             actionData.append(contentsOf: values)
         }
         let actionsMLX = MLXArray(actionData).reshaped([1, steps, config.actionDimensions])
@@ -170,14 +188,24 @@ public struct MLXWorldModelController: WorldModelProtocol {
 
     /// Convert sensor observations to a fixed-size float array.
     /// Fills in order of channel index, zero-padding missing channels.
-    private func sensorObservationsToArray(_ observations: [ChannelSample]) -> [Float] {
+    private func sensorObservationsToArray(_ observations: [ChannelSample]) throws -> [Float] {
         var result = Array<Float>(repeating: 0, count: config.sensorDimensions)
         for sample in observations {
             let index = Int(sample.channelIndex)
-            if index < config.sensorDimensions {
-                result[index] = Float(sample.value)
+            guard index < config.sensorDimensions else {
+                throw ControllerError.sensorChannelOutOfRange(
+                    channelIndex: sample.channelIndex,
+                    limit: config.sensorDimensions
+                )
             }
+            result[index] = Float(sample.value)
         }
         return result
+    }
+
+    private func validateFinitePhysicsArray(_ values: [Float]) throws {
+        for (index, value) in values.enumerated() where !value.isFinite {
+            throw ControllerError.nonFinitePhysicsState(index: index)
+        }
     }
 }

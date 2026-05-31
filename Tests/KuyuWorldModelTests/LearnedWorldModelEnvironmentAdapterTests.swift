@@ -76,6 +76,46 @@ import KuyuCore
     }
 }
 
+@Test func learnedWorldModelEnvironmentAdapterNormalizesCorrectedOrientation() throws {
+    let step = try makeEnvironmentStep()
+    let model = FixedWorldModel(
+        residual: residual(qx: 1.0),
+        uncertainty: Array(repeating: Float(0.0), count: 13)
+    )
+    let adapter = try LearnedWorldModelEnvironmentAdapter(
+        model: model,
+        timeStep: 0.001
+    )
+
+    let prediction = try adapter.predict(reference: step)
+    let orientation = prediction.step.observation.plantState.root.orientation
+    let norm = sqrt(
+        orientation.w * orientation.w
+            + orientation.x * orientation.x
+            + orientation.y * orientation.y
+            + orientation.z * orientation.z
+    )
+    #expect(abs(norm - 1.0) < 1e-12)
+    #expect(abs(orientation.w - (1.0 / sqrt(2.0))) < 1e-12)
+    #expect(abs(orientation.x - (1.0 / sqrt(2.0))) < 1e-12)
+}
+
+@Test func learnedWorldModelEnvironmentAdapterRejectsZeroCorrectedOrientation() throws {
+    let step = try makeEnvironmentStep()
+    let model = FixedWorldModel(
+        residual: residual(qw: -1.0),
+        uncertainty: Array(repeating: Float(0.0), count: 13)
+    )
+    let adapter = try LearnedWorldModelEnvironmentAdapter(
+        model: model,
+        timeStep: 0.001
+    )
+
+    #expect(throws: LearnedWorldModelEnvironmentAdapter<FixedWorldModel>.AdapterError.invalidCorrectedQuaternion) {
+        _ = try adapter.predict(reference: step)
+    }
+}
+
 private struct FixedWorldModel: WorldModelProtocol {
     var residual: [Float]
     var uncertainty: [Float]
@@ -111,12 +151,16 @@ private struct FixedWorldModel: WorldModelProtocol {
 private func residual(
     x: Float = 0,
     y: Float = 0,
-    z: Float = 0
+    z: Float = 0,
+    qw: Float = 0,
+    qx: Float = 0,
+    qy: Float = 0,
+    qz: Float = 0
 ) -> [Float] {
     [
         x, y, z,
         0, 0, 0,
-        0, 0, 0, 0,
+        qw, qx, qy, qz,
         0, 0, 0,
     ]
 }
