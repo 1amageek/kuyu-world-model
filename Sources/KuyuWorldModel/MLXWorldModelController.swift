@@ -23,6 +23,7 @@ public struct MLXWorldModelController: PhysicsAwareWorldModelProtocol {
         case physicsPredictionCountMismatch(expected: Int, got: Int)
         case sensorChannelOutOfRange(channelIndex: UInt32, limit: Int)
         case nonFinitePhysicsState(index: Int)
+        case nonFiniteAction(index: Int)
     }
 
     /// Thread-safe storage for non-Sendable model and mutable state.
@@ -85,7 +86,7 @@ public struct MLXWorldModelController: PhysicsAwareWorldModelProtocol {
         let sensorMLX = MLXArray(sensorValues).reshaped([1, config.sensorDimensions])
 
         // Convert actions to MLXArray [1, actionDim]
-        let actionValues = action.map { Float($0.value) }
+        let actionValues = try actionValues(from: action)
         guard actionValues.count == config.actionDimensions else {
             throw ControllerError.dimensionMismatch(expected: config.actionDimensions, got: actionValues.count)
         }
@@ -139,7 +140,7 @@ public struct MLXWorldModelController: PhysicsAwareWorldModelProtocol {
         // Build actions tensor [1, steps, actionDim]
         var actionData: [Float] = []
         for stepActions in actions {
-            let values = stepActions.map { Float($0.value) }
+            let values = try actionValues(from: stepActions)
             guard values.count == config.actionDimensions else {
                 throw ControllerError.actionCountMismatch(expected: config.actionDimensions, got: values.count)
             }
@@ -179,7 +180,7 @@ public struct MLXWorldModelController: PhysicsAwareWorldModelProtocol {
         }
     }
 
-    public mutating func predictFuture(
+    public func predictFuture(
         physicsPredictions: [[Float]],
         actions: [[ActuatorValue]],
         dt: TimeInterval
@@ -208,7 +209,7 @@ public struct MLXWorldModelController: PhysicsAwareWorldModelProtocol {
             }
             try validateFinitePhysicsArray(physicsPrediction)
 
-            let actionValues = stepActions.map { Float($0.value) }
+            let actionValues = try actionValues(from: stepActions)
             guard actionValues.count == config.actionDimensions else {
                 throw ControllerError.actionCountMismatch(
                     expected: config.actionDimensions,
@@ -273,6 +274,16 @@ public struct MLXWorldModelController: PhysicsAwareWorldModelProtocol {
     private func validateFinitePhysicsArray(_ values: [Float]) throws {
         for (index, value) in values.enumerated() where !value.isFinite {
             throw ControllerError.nonFinitePhysicsState(index: index)
+        }
+    }
+
+    private func actionValues(from actions: [ActuatorValue]) throws -> [Float] {
+        try actions.enumerated().map { index, action in
+            let value = Float(action.value)
+            guard value.isFinite else {
+                throw ControllerError.nonFiniteAction(index: index)
+            }
+            return value
         }
     }
 }

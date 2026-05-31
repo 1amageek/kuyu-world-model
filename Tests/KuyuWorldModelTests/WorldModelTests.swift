@@ -339,6 +339,23 @@ import KuyuCore
         }
     }
 
+    @Test func inferRejectsActionOverflowAfterFloatConversion() throws {
+        let config = smallControllerConfig()
+        var controller = MLXWorldModelController(model: StateWorldModel(config: config), config: config)
+        let actions = [
+            try ActuatorValue(index: ActuatorIndex(0), value: Double.greatestFiniteMagnitude),
+        ]
+
+        #expect(throws: MLXWorldModelController.ControllerError.nonFiniteAction(index: 0)) {
+            _ = try controller.infer(
+                physicsPrediction: FixedAnalyticalState(values: [0, 0, 0]),
+                sensorObservations: [],
+                action: actions,
+                dt: 0.01
+            )
+        }
+    }
+
     @Test func predictFutureRejectsPerStepActionDimensionMismatch() throws {
         let config = smallControllerConfig()
         var controller = MLXWorldModelController(model: StateWorldModel(config: config), config: config)
@@ -380,6 +397,22 @@ import KuyuCore
             _ = try controller.predictFuture(
                 physicsPredictions: [[0, 0, .nan]],
                 actions: [try actuatorValues(count: 1)],
+                dt: 0.01
+            )
+        }
+    }
+
+    @Test func predictFutureWithPhysicsPredictionsRejectsActionOverflowAfterFloatConversion() throws {
+        let config = smallControllerConfig()
+        let controller = MLXWorldModelController(model: StateWorldModel(config: config), config: config)
+        let actions = [
+            [try ActuatorValue(index: ActuatorIndex(0), value: Double.greatestFiniteMagnitude)],
+        ]
+
+        #expect(throws: MLXWorldModelController.ControllerError.nonFiniteAction(index: 0)) {
+            _ = try controller.predictFuture(
+                physicsPredictions: [[0, 0, 0]],
+                actions: actions,
                 dt: 0.01
             )
         }
