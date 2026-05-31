@@ -1,3 +1,4 @@
+import Foundation
 import MLX
 import MLXNN
 import MLXOptimizers
@@ -55,18 +56,23 @@ public enum StateWorldModelTrainer {
 
         for _ in 0..<epochs {
             var totalLoss: Float = 0
+            var totalStepCount = 0
             for batch in batches {
-                let packedInputs = concatenated(
-                    [batch.physicsStates, batch.sensorObservations, batch.actions],
-                    axis: -1
-                )
-                let (lossValue, gradients) = lossAndGrad(model, packedInputs, batch.residualTargets)
-                let clipped = clipIfNeeded(gradients, maxNorm: maxGradNorm)
-                optimizer.update(model: model, gradients: clipped)
-                eval(model, optimizer)
-                totalLoss += lossValue.item(Float.self)
+                let (loss, stepCount): (Float, Int) = autoreleasepool {
+                    let packedInputs = concatenated(
+                        [batch.physicsStates, batch.sensorObservations, batch.actions],
+                        axis: -1
+                    )
+                    let (lossValue, gradients) = lossAndGrad(model, packedInputs, batch.residualTargets)
+                    let clipped = clipIfNeeded(gradients, maxNorm: maxGradNorm)
+                    optimizer.update(model: model, gradients: clipped)
+                    eval(model, optimizer)
+                    return (lossValue.item(Float.self), batchStepCount(batch.residualTargets))
+                }
+                totalLoss += loss * Float(stepCount)
+                totalStepCount += stepCount
             }
-            epochLosses.append(totalLoss / Float(max(batches.count, 1)))
+            epochLosses.append(totalLoss / Float(max(totalStepCount, 1)))
         }
 
         model.train(false)
@@ -78,4 +84,11 @@ public enum StateWorldModelTrainer {
         return clipGradNorm(gradients: gradients, maxNorm: maxNorm).0
     }
 
+    private static func batchStepCount(_ targets: MLXArray) -> Int {
+        let shape = targets.shape
+        guard shape.count >= 3 else {
+            return shape.first ?? 1
+        }
+        return max(1, shape[0] * shape[1])
+    }
 }
