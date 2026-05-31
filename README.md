@@ -29,7 +29,7 @@ The world model receives physics predictions as the reference input and learns t
 
 - **Physics is never modified**: The world model only provides corrections on top. Environment adapters build corrected outputs from a reference physics result; they do not mutate the physics simulator state.
 - **Untrained = identity**: Residual and extension output layers start at zero, and the domain adapter starts as an exact identity projection. An untrained neural model therefore emits zero correction and zero extension.
-- **Prior learns from posterior**: Training includes a categorical KL term between prior and observation-conditioned posterior logits, so prior-only rollout has a supervised path.
+- **Prior learns from posterior**: Training includes a categorical KL term that moves prior logits toward stop-gradient observation-conditioned posterior logits, so prior-only rollout has a supervised path without degrading the posterior correction path.
 - **Physics-aware imagination is composed outside this package**: kuyu-world-model does not depend on kuyu-physics. Fused callers that own both systems pass a physics advance callback into `WorldPredictor`.
 - **Uncertainty polarity is explicit**: `0` means low uncertainty and `1` means high uncertainty. Residual uncertainty is trained with a Gaussian negative log-likelihood term against residual error. Environment acceptance gates use residual uncertainty only; extension uncertainty remains latent metadata.
 

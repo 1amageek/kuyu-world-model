@@ -138,7 +138,9 @@ public enum StateWorldModelTrainer {
             modelConfig.stochasticClasses,
         ]
         let priorLogProbs = logSoftmax(priorLogits.reshaped(categoricalShape), axis: -1)
-        let posteriorLogProbs = logSoftmax(posteriorLogits.reshaped(categoricalShape), axis: -1)
+        let posteriorLogProbs = stopGradient(
+            logSoftmax(posteriorLogits.reshaped(categoricalShape), axis: -1)
+        )
         return klDivLoss(
             inputs: priorLogProbs,
             targets: posteriorLogProbs,
