@@ -358,6 +358,50 @@ import KuyuCore
         let outputs = try controller.predictFuture(steps: 0, actions: [])
         #expect(outputs.isEmpty)
     }
+
+    @Test func predictFutureWithPhysicsPredictionsRejectsCountMismatch() throws {
+        let config = smallControllerConfig()
+        var controller = MLXWorldModelController(model: StateWorldModel(config: config), config: config)
+
+        #expect(throws: MLXWorldModelController.ControllerError.physicsPredictionCountMismatch(expected: 1, got: 2)) {
+            _ = try controller.predictFuture(
+                physicsPredictions: [[0, 0, 0], [1, 1, 1]],
+                actions: [try actuatorValues(count: 1)],
+                dt: 0.01
+            )
+        }
+    }
+
+    @Test func predictFutureWithPhysicsPredictionsRejectsNonFinitePhysicsState() throws {
+        let config = smallControllerConfig()
+        var controller = MLXWorldModelController(model: StateWorldModel(config: config), config: config)
+
+        #expect(throws: MLXWorldModelController.ControllerError.nonFinitePhysicsState(index: 2)) {
+            _ = try controller.predictFuture(
+                physicsPredictions: [[0, 0, .nan]],
+                actions: [try actuatorValues(count: 1)],
+                dt: 0.01
+            )
+        }
+    }
+
+    @Test func predictFutureWithPhysicsPredictionsUsesPriorOutputShape() throws {
+        let config = smallControllerConfig()
+        var controller = MLXWorldModelController(model: StateWorldModel(config: config), config: config)
+
+        let outputs = try controller.predictFuture(
+            physicsPredictions: [[0, 0, 0], [1, 1, 1]],
+            actions: [try actuatorValues(count: 1), try actuatorValues(count: 1)],
+            dt: 0.01
+        )
+
+        #expect(outputs.count == 2)
+        for output in outputs {
+            #expect(output.residual.count == config.residualDimensions)
+            #expect(output.extensions.count == config.extensionDimensions)
+            #expect(output.uncertainty.count == config.residualDimensions + config.extensionDimensions)
+        }
+    }
 }
 
 @Suite struct DomainAdapterTests {

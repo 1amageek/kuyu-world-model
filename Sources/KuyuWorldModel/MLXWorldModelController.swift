@@ -12,7 +12,7 @@ import KuyuCore
 /// Thread safety: StateWorldModel is a class (MLX Module subclass) that is not Sendable.
 /// Access is serialized through the mutating protocol methods, and the model reference
 /// is protected by the Storage class with Mutex.
-public struct MLXWorldModelController: WorldModelProtocol {
+public struct MLXWorldModelController: PhysicsAwareWorldModelProtocol {
 
     public enum ControllerError: Error, Equatable {
         case invalidTimeStep(Double)
@@ -20,6 +20,7 @@ public struct MLXWorldModelController: WorldModelProtocol {
         case dimensionMismatch(expected: Int, got: Int)
         case actionCountMismatch(expected: Int, got: Int)
         case stepCountMismatch(expected: Int, got: Int)
+        case physicsPredictionCountMismatch(expected: Int, got: Int)
         case sensorChannelOutOfRange(channelIndex: UInt32, limit: Int)
         case nonFinitePhysicsState(index: Int)
     }
@@ -171,6 +172,72 @@ public struct MLXWorldModelController: WorldModelProtocol {
                     residual: residualValues,
                     extensions: extensionValues,
                     uncertainty: uncertaintyValues
+                ))
+            }
+
+            return outputs
+        }
+    }
+
+    public mutating func predictFuture(
+        physicsPredictions: [[Float]],
+        actions: [[ActuatorValue]],
+        dt: TimeInterval
+    ) throws -> [WorldModelOutput] {
+        guard dt.isFinite, dt > 0 else {
+            throw ControllerError.invalidTimeStep(dt)
+        }
+        guard physicsPredictions.count == actions.count else {
+            throw ControllerError.physicsPredictionCountMismatch(
+                expected: actions.count,
+                got: physicsPredictions.count
+            )
+        }
+        guard !physicsPredictions.isEmpty else {
+            return []
+        }
+
+        var preparedSteps: [(physics: [Float], action: [Float])] = []
+        preparedSteps.reserveCapacity(physicsPredictions.count)
+        for (physicsPrediction, stepActions) in zip(physicsPredictions, actions) {
+            guard physicsPrediction.count == config.physicsDimensions else {
+                throw ControllerError.dimensionMismatch(
+                    expected: config.physicsDimensions,
+                    got: physicsPrediction.count
+                )
+            }
+            try validateFinitePhysicsArray(physicsPrediction)
+
+            let actionValues = stepActions.map { Float($0.value) }
+            guard actionValues.count == config.actionDimensions else {
+                throw ControllerError.actionCountMismatch(
+                    expected: config.actionDimensions,
+                    got: actionValues.count
+                )
+            }
+            preparedSteps.append((physicsPrediction, actionValues))
+        }
+
+        return try storage.withLockThrowing { state in
+            var h = MLXArray(state.worldState.h).reshaped([1, config.hiddenDimensions])
+            var outputs: [WorldModelOutput] = []
+            outputs.reserveCapacity(preparedSteps.count)
+
+            for step in preparedSteps {
+                let physicsMLX = MLXArray(step.physics).reshaped([1, config.physicsDimensions])
+                let actionMLX = MLXArray(step.action).reshaped([1, config.actionDimensions])
+                let result = state.model.imaginationStep(
+                    physicsState: physicsMLX,
+                    action: actionMLX,
+                    h: h
+                )
+                eval(result.residual, result.extensions, result.uncertainty, result.h)
+
+                h = result.h
+                outputs.append(try WorldModelOutput(
+                    residual: result.residual.squeezed(axis: 0).asArray(Float.self),
+                    extensions: result.extensions.squeezed(axis: 0).asArray(Float.self),
+                    uncertainty: result.uncertainty.squeezed(axis: 0).asArray(Float.self)
                 ))
             }
 
