@@ -4,7 +4,7 @@ import MLXNN
 /// Sim-to-real domain adaptation module.
 ///
 /// Applies a learned projection to residual and extension outputs
-/// to bridge the sim-to-real gap. Initially acts as near-identity.
+/// to bridge the sim-to-real gap. Initially acts as exact identity.
 /// Will be trained with real data via LoRA or full fine-tuning.
 public final class DomainAdapter: Module {
 
@@ -12,11 +12,11 @@ public final class DomainAdapter: Module {
     @ModuleInfo public var extensionProjection: Linear
 
     public init(config: WorldModelConfig) {
-        self._residualProjection.wrappedValue = Linear(
-            config.residualDimensions, config.residualDimensions
+        self._residualProjection.wrappedValue = LinearInitializers.identity(
+            dimensions: config.residualDimensions
         )
-        self._extensionProjection.wrappedValue = Linear(
-            config.extensionDimensions, config.extensionDimensions
+        self._extensionProjection.wrappedValue = LinearInitializers.identity(
+            dimensions: config.extensionDimensions
         )
     }
 

@@ -3,22 +3,26 @@ import MLX
 import MLXNN
 import MLXOptimizers
 
-/// Minimal trainer for StateWorldModel residual learning.
+/// Minimal trainer for StateWorldModel residual and prior learning.
 ///
-/// This trains the learned residual head against physics-vs-actual residuals.
+/// This trains the learned residual head against physics-vs-actual residuals
+/// and regularizes the prior toward the observation-conditioned posterior.
 /// Physics remains the source of truth for validation; the trained model is
 /// consumed through LearnedWorldModelEnvironmentAdapter gates.
 public enum StateWorldModelTrainer {
     public struct Config: Sendable, Codable, Equatable {
         public let residualWeight: Float
         public let uncertaintyWeight: Float
+        public let klWeight: Float
 
         public init(
             residualWeight: Float = 1.0,
-            uncertaintyWeight: Float = 0.001
+            uncertaintyWeight: Float = 0.001,
+            klWeight: Float = 0.001
         ) {
             self.residualWeight = residualWeight
             self.uncertaintyWeight = uncertaintyWeight
+            self.klWeight = klWeight
         }
     }
 
@@ -49,7 +53,14 @@ public enum StateWorldModelTrainer {
                 reduction: .mean
             )
             let uncertaintyPenalty = output.uncertainty.mean()
-            return config.residualWeight * residualLoss + config.uncertaintyWeight * uncertaintyPenalty
+            let klLoss = categoricalKLLoss(
+                priorLogits: output.priorLogits,
+                posteriorLogits: output.posteriorLogits,
+                modelConfig: model.config
+            )
+            return config.residualWeight * residualLoss
+                + config.uncertaintyWeight * uncertaintyPenalty
+                + config.klWeight * klLoss
         }
         var epochLosses: [Float] = []
         model.train(true)
@@ -90,5 +101,29 @@ public enum StateWorldModelTrainer {
             return shape.first ?? 1
         }
         return max(1, shape[0] * shape[1])
+    }
+
+    private static func categoricalKLLoss(
+        priorLogits: MLXArray,
+        posteriorLogits: MLXArray,
+        modelConfig: WorldModelConfig
+    ) -> MLXArray {
+        guard modelConfig.stochasticCategories > 0, modelConfig.stochasticClasses > 0 else {
+            return MLXArray(Float(0))
+        }
+
+        let leadingDimensions = Array(priorLogits.shape.dropLast())
+        let categoricalShape = leadingDimensions + [
+            modelConfig.stochasticCategories,
+            modelConfig.stochasticClasses,
+        ]
+        let priorLogProbs = logSoftmax(priorLogits.reshaped(categoricalShape), axis: -1)
+        let posteriorLogProbs = logSoftmax(posteriorLogits.reshaped(categoricalShape), axis: -1)
+        return klDivLoss(
+            inputs: priorLogProbs,
+            targets: posteriorLogProbs,
+            axis: -1,
+            reduction: .mean
+        )
     }
 }

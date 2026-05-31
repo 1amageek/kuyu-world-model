@@ -137,6 +137,16 @@ import KuyuCore
         #expect(output.shape == [2, config.residualDimensions])
     }
 
+    @Test func residualDecoderStartsAtZero() {
+        let config = WorldModelConfig()
+        let decoder = ResidualDecoder(config: config)
+        let input = MLXRandom.uniform(0 ..< 1, [2, config.decoderInputDimensions])
+        let output = decoder(input)
+        eval(output)
+        let values = output.asArray(Float.self)
+        #expect(values.allSatisfy { abs($0) <= 1e-6 })
+    }
+
     @Test func extensionDecoderShape() {
         let config = WorldModelConfig()
         let decoder = ExtensionDecoder(config: config)
@@ -144,6 +154,16 @@ import KuyuCore
         let output = decoder(input)
         eval(output)
         #expect(output.shape == [2, config.extensionDimensions])
+    }
+
+    @Test func extensionDecoderStartsAtZero() {
+        let config = WorldModelConfig()
+        let decoder = ExtensionDecoder(config: config)
+        let input = MLXRandom.uniform(0 ..< 1, [2, config.decoderInputDimensions])
+        let output = decoder(input)
+        eval(output)
+        let values = output.asArray(Float.self)
+        #expect(values.allSatisfy { abs($0) <= 1e-6 })
     }
 
     @Test func uncertaintyDecoderShape() {
@@ -166,6 +186,16 @@ import KuyuCore
         // Sigmoid output must be in [0, 1]
         #expect(minVal >= 0.0)
         #expect(maxVal <= 1.0)
+    }
+
+    @Test func uncertaintyDecoderStartsNeutral() {
+        let config = WorldModelConfig()
+        let decoder = UncertaintyDecoder(config: config)
+        let input = MLXRandom.uniform(0 ..< 1, [2, config.decoderInputDimensions])
+        let output = decoder(input)
+        eval(output)
+        let values = output.asArray(Float.self)
+        #expect(values.allSatisfy { abs($0 - 0.5) <= 1e-6 })
     }
 }
 
@@ -235,6 +265,30 @@ import KuyuCore
             #expect(pred.residual.shape == [1, config.residualDimensions])
             #expect(pred.h.shape == [1, config.hiddenDimensions])
         }
+    }
+
+    @Test func rolloutUsesPhysicsAdvanceCallback() {
+        let config = WorldModelConfig()
+        let model = StateWorldModel(config: config)
+        let predictor = WorldPredictor(model: model)
+        let steps = 3
+        let h = MLXArray.zeros([1, config.hiddenDimensions])
+        let physics = MLXArray.zeros([1, config.physicsDimensions])
+        let actions = MLXArray.zeros([1, steps, config.actionDimensions])
+        var visitedSteps: [Int] = []
+
+        let predictions = predictor.rollout(
+            initialH: h,
+            initialPhysics: physics,
+            actions: actions,
+            advancePhysics: { currentPhysics, _, residual, stepIndex in
+                visitedSteps.append(stepIndex)
+                return currentPhysics + residual
+            }
+        )
+
+        #expect(predictions.count == steps)
+        #expect(visitedSteps == [0, 1, 2])
     }
 }
 
@@ -318,6 +372,21 @@ import KuyuCore
         #expect(adaptedRes.shape == [2, config.residualDimensions])
         #expect(adaptedExt.shape == [2, config.extensionDimensions])
     }
+
+    @Test func adapterStartsAsIdentity() {
+        let config = WorldModelConfig()
+        let adapter = DomainAdapter(config: config)
+        let residualValues = (0..<config.residualDimensions).map { Float($0) / 10 }
+        let extensionValues = (0..<config.extensionDimensions).map { Float($0) / 20 }
+        let residual = MLXArray(residualValues).reshaped([1, config.residualDimensions])
+        let ext = MLXArray(extensionValues).reshaped([1, config.extensionDimensions])
+
+        let (adaptedRes, adaptedExt) = adapter(simResidual: residual, simExtension: ext)
+        eval(adaptedRes, adaptedExt)
+
+        expectAllClose(adaptedRes.asArray(Float.self), residualValues)
+        expectAllClose(adaptedExt.asArray(Float.self), extensionValues)
+    }
 }
 
 @Suite struct WorldModelStateTests {
@@ -338,6 +407,11 @@ import KuyuCore
 }
 
 @Suite struct StateWorldModelTrainerTests {
+
+    @Test func trainerConfigStoresKLWeight() {
+        let config = StateWorldModelTrainer.Config(klWeight: 0.25)
+        #expect(config.klWeight == 0.25)
+    }
 
     @Test func trainerProducesFiniteLossForSmallResidualBatch() {
         let config = WorldModelConfig(
@@ -393,6 +467,13 @@ private func smallControllerConfig() -> WorldModelConfig {
 private func actuatorValues(count: Int) throws -> [ActuatorValue] {
     try (0..<count).map { index in
         try ActuatorValue(index: ActuatorIndex(UInt32(index)), value: 0)
+    }
+}
+
+private func expectAllClose(_ actual: [Float], _ expected: [Float], tolerance: Float = 1e-6) {
+    #expect(actual.count == expected.count)
+    for (actualValue, expectedValue) in zip(actual, expected) {
+        #expect(abs(actualValue - expectedValue) <= tolerance)
     }
 }
 

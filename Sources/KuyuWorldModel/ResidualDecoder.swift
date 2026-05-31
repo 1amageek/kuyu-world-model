@@ -6,6 +6,7 @@ import MLXNN
 /// Input: [batch, hiddenDim + stochasticLatentSize] -> Output: [batch, physicsDim]
 /// The output is an additive correction to the physics prediction.
 /// 2-layer MLP with tanh output to bound the correction magnitude.
+/// The output layer starts at zero so an untrained model is exactly identity.
 public final class ResidualDecoder: Module {
 
     @ModuleInfo public var layer1: Linear
@@ -17,7 +18,10 @@ public final class ResidualDecoder: Module {
         let hiddenDim = config.hiddenDimensions
         self._layer1.wrappedValue = Linear(inputDim, hiddenDim)
         self._layer2.wrappedValue = Linear(hiddenDim, hiddenDim / 2)
-        self._outputLayer.wrappedValue = Linear(hiddenDim / 2, config.residualDimensions)
+        self._outputLayer.wrappedValue = LinearInitializers.zero(
+            inputDimensions: hiddenDim / 2,
+            outputDimensions: config.residualDimensions
+        )
     }
 
     /// Decode residual corrections.

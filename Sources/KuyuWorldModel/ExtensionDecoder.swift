@@ -7,6 +7,7 @@ import MLXNN
 /// Extensions represent dimensions not present in the physics model
 /// (environment context, adaptation vectors, unmodeled dynamics).
 /// 2-layer MLP with no bounded output (extensions are free-form latent dimensions).
+/// The output layer starts at zero so untrained extensions carry no signal.
 public final class ExtensionDecoder: Module {
 
     @ModuleInfo public var layer1: Linear
@@ -18,7 +19,10 @@ public final class ExtensionDecoder: Module {
         let hiddenDim = config.hiddenDimensions
         self._layer1.wrappedValue = Linear(inputDim, hiddenDim)
         self._layer2.wrappedValue = Linear(hiddenDim, hiddenDim / 2)
-        self._outputLayer.wrappedValue = Linear(hiddenDim / 2, config.extensionDimensions)
+        self._outputLayer.wrappedValue = LinearInitializers.zero(
+            inputDimensions: hiddenDim / 2,
+            outputDimensions: config.extensionDimensions
+        )
     }
 
     /// Decode extension dimensions.

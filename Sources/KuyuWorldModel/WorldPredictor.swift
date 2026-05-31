@@ -1,9 +1,19 @@
 import MLX
 import MLXNN
 
-/// Rolls out the world model transition for N steps using prior only (no observations).
-/// Used for imagination-based RL training (DreamerV3 pattern).
+/// Rolls out the world model transition for N steps using prior only.
+///
+/// The model stays independent from analytical physics. Callers that own a physics
+/// integrator can provide `PhysicsAdvance` so imagination uses the real physics step
+/// plus learned residuals; the default keeps the previous residual-only behavior.
 public final class WorldPredictor: Module {
+
+    public typealias PhysicsAdvance = (
+        _ currentPhysics: MLXArray,
+        _ action: MLXArray,
+        _ residual: MLXArray,
+        _ stepIndex: Int
+    ) -> MLXArray
 
     @ModuleInfo public var model: StateWorldModel
 
@@ -20,16 +30,19 @@ public final class WorldPredictor: Module {
     ///   - initialH: initial hidden state [batch, hiddenDim]
     ///   - initialPhysics: initial physics state [batch, physicsDim]
     ///   - actions: sequence of actions [batch, steps, actionDim]
+    ///   - advancePhysics: optional physics integrator callback for the next state
     /// - Returns: array of WorldPrediction for each step
     public func rollout(
         initialH: MLXArray,
         initialPhysics: MLXArray,
-        actions: MLXArray
+        actions: MLXArray,
+        advancePhysics: PhysicsAdvance? = nil
     ) -> [WorldPrediction] {
         let steps = actions.dim(1)
         var h = initialH
         var currentPhysics = initialPhysics
         var predictions: [WorldPrediction] = []
+        let advancePhysics = advancePhysics ?? Self.residualOnlyAdvance
 
         for t in 0..<steps {
             let action = actions[.ellipsis, t, 0...]  // [batch, actionDim]
@@ -50,9 +63,7 @@ public final class WorldPredictor: Module {
 
             h = result.h
 
-            // Update physics state with residual for next step's encoding
-            // (the world model predicts corrections; apply them for the next step)
-            currentPhysics = currentPhysics + result.residual
+            currentPhysics = advancePhysics(currentPhysics, action, result.residual, t)
         }
 
         return predictions
@@ -64,5 +75,14 @@ public final class WorldPredictor: Module {
         actions: MLXArray
     ) -> [WorldPrediction] {
         rollout(initialH: initialH, initialPhysics: initialPhysics, actions: actions)
+    }
+
+    public static func residualOnlyAdvance(
+        currentPhysics: MLXArray,
+        action: MLXArray,
+        residual: MLXArray,
+        stepIndex: Int
+    ) -> MLXArray {
+        currentPhysics + residual
     }
 }

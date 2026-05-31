@@ -1,17 +1,18 @@
 # kuyu-world-model
 
-DreamerV3-based learned world model for the Kuyu fused environment.
+Physics-residual learned world model for the Kuyu fused environment.
 
 ## Overview
 
-kuyu-world-model implements a physics-informed world model that learns to correct and extend analytical physics predictions. Built on MLX Swift for Apple Silicon acceleration.
+kuyu-world-model implements a physics-informed world model that learns to correct and extend analytical physics predictions. Built on MLX Swift for Apple Silicon acceleration. Analytical physics remains the reference trajectory; learned outputs are residual and extension signals that must pass validation gates before use.
 
 ### Architecture
 
-The world model receives physics predictions as a prior and learns two outputs:
+The world model receives physics predictions as the reference input and learns two outputs:
 
 - **Residual** — Additive corrections to physics predictions (same dimension space). Captures phenomena outside the ODE: ground effect, motor degradation, wind turbulence, etc.
-- **Extension** — New latent dimensions not present in physics: environment context, adaptation vectors, uncertainty estimates.
+- **Extension** — New latent dimensions not present in physics: environment context, adaptation vectors, and adaptation features.
+- **Uncertainty** — Per-dimension risk score where `0` is low uncertainty and `1` is high uncertainty.
 
 ### Components
 
@@ -20,15 +21,17 @@ The world model receives physics predictions as a prior and learns two outputs:
 - **`StateTokenizer`** — 1D causal convolution encoder/decoder for time-series compression.
 - **`TransitionModel`** — Physics-informed GRU with categorical stochastic latent (DreamerV3-style RSSM).
 - **`ResidualDecoder`** / **`ExtensionDecoder`** / **`UncertaintyDecoder`** — Decode hidden state into outputs.
-- **`WorldPredictor`** — Multi-step rollout for imagination-based RL.
+- **`WorldPredictor`** — Prior-only multi-step rollout. Callers can inject a physics advance callback so imagination uses the analytical integrator plus learned residuals without making this package depend on kuyu-physics.
 - **`DomainAdapter`** — Sim-to-real transfer mapping.
 - **`MLXWorldModelController`** — Bridges `StateWorldModel` to the `WorldModelProtocol` (thread-safe via Mutex).
 
 ### Key Design Properties
 
-- **Physics is never modified**: The world model only provides corrections on top.
-- **KL divergence as physics accuracy metric**: When physics is accurate, prior ~ posterior (KL ~ 0). When inaccurate, posterior diverges (KL > 0).
-- **Untrained = identity**: Random initialization produces near-zero residuals, so `FusedState ~ physics_prediction`.
+- **Physics is never modified**: The world model only provides corrections on top. Environment adapters build corrected outputs from a reference physics result; they do not mutate the physics simulator state.
+- **Untrained = identity**: Residual and extension output layers start at zero, and the domain adapter starts as an exact identity projection. An untrained neural model therefore emits zero correction and zero extension.
+- **Prior learns from posterior**: Training includes a categorical KL term between prior and observation-conditioned posterior logits, so prior-only rollout has a supervised path.
+- **Physics-aware imagination is composed outside this package**: kuyu-world-model does not depend on kuyu-physics. Fused callers that own both systems pass a physics advance callback into `WorldPredictor`.
+- **Uncertainty polarity is explicit**: `0` means low uncertainty and `1` means high uncertainty. Current training applies a small uncertainty penalty; stronger calibration should use held-out residual error or a likelihood objective before treating uncertainty as a calibrated probability.
 
 ## Package Structure
 

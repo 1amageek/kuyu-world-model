@@ -5,7 +5,7 @@ import MLXNN
 ///
 /// Input: [batch, hiddenDim + stochasticLatentSize]
 /// Output: [batch, residualDim + extensionDim]
-/// Sigmoid output: 0 = no confidence, 1 = full confidence.
+/// Sigmoid output: 0 = low uncertainty, 1 = high uncertainty.
 public final class UncertaintyDecoder: Module {
 
     @ModuleInfo public var layer1: Linear
@@ -20,12 +20,15 @@ public final class UncertaintyDecoder: Module {
         let hiddenDim = config.hiddenDimensions
         self._layer1.wrappedValue = Linear(inputDim, hiddenDim)
         self._layer2.wrappedValue = Linear(hiddenDim, hiddenDim / 2)
-        self._outputLayer.wrappedValue = Linear(hiddenDim / 2, outputDimensions)
+        self._outputLayer.wrappedValue = LinearInitializers.zero(
+            inputDimensions: hiddenDim / 2,
+            outputDimensions: outputDimensions
+        )
     }
 
     /// Decode per-dimension uncertainty estimates.
     /// - Parameter state: combined state [batch, decoderInputDim]
-    /// - Returns: confidence scores [batch, residualDim + extensionDim] in [0, 1]
+    /// - Returns: uncertainty scores [batch, residualDim + extensionDim] in [0, 1]
     public func callAsFunction(_ state: MLXArray) -> MLXArray {
         var h = relu(layer1(state))
         h = relu(layer2(h))
