@@ -52,12 +52,12 @@ KuyuCore
   |
   +-- KuyuWorldModel (this package) + mlx-swift
   |     |
-  |     +-- kuyu/KuyuMLX (assembles FusedEnvironment)
+  |     +-- kuyu-mlx/KuyuMLX (assembles FusedEnvironment)
   |
   +-- KuyuPhysics (independent, no mutual dependency)
 ```
 
-kuyu-world-model and kuyu-physics are independent of each other. They are composed together in kuyu via `FusedEnvironment<QuadrotorAnalyticalModel, MLXWorldModelController, SensorField>`.
+kuyu-world-model and kuyu-physics are independent of each other. They are composed together by `kuyu-mlx` paths that own both the MLX world-model controller and the physics-backed fused environment. CLI/UI exposure belongs to the Kuyu app package, not to this world-model package.
 
 ## License
 
